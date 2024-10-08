@@ -212,10 +212,10 @@ def get_parsed_note_info_list(note_id_list: list) -> list:
     user_id = temp_list[0]['user_id']
     user_name = temp_list[0]['user_name']
 
-    base_path = f'download/{user_name}'
+    base_path = f'download/{user_id}-{user_name}'
     os.makedirs(base_path, exist_ok=True)
     with open(f'{base_path}/{user_id}', 'w') as f:
-        f.write('')
+        f.write(f'{user_id}')
 
     result_file_path = f'{base_path}/result.json'
     if os.path.isfile(result_file_path):
@@ -266,6 +266,7 @@ def get_result_json(result_file_path: str, note_id_list: list, parsed_note_info_
 
 
 def download_note(note: dict):
+    user_id = note.get('user_id')
     user_name = note.get('user_name')
     create_time = note.get('create_time')
     title = note.get('title')
@@ -273,7 +274,7 @@ def download_note(note: dict):
     image_id_list = note.get('image_id_list')
     video_url = note.get('video_url')
 
-    current_date_path = f'download/{user_name}/{create_time}'
+    current_date_path = f'download/{user_id}-{user_name}/{create_time}'
     os.makedirs(current_date_path, exist_ok=True)
 
     if title is not None:
