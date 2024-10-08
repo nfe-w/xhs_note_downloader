@@ -39,6 +39,8 @@ browser.implicitly_wait(10)
 
 
 def open_browser_and_login():
+    browser.execute_script("window.open('');")
+    browser.switch_to.window(browser.window_handles[-1])
     browser.get(f'https://www.xiaohongshu.com/user/profile/{profile_id}')
     time.sleep(2)
 
@@ -70,7 +72,7 @@ def scroll_one_screen():
 def recursion_scroll_until_no_more(note_id_list: list, cursor: str) -> list:
     if cursor is None and cursor != '':
         return []
-    print(f'正在进行递归获取分页数据')
+    print(f'正在进行递归获取分页数据，滚动10次并拦截请求')
     # 向下滚动页面10次
     for _ in range(10):
         scroll_one_screen()
@@ -94,6 +96,7 @@ def recursion_scroll_until_no_more(note_id_list: list, cursor: str) -> list:
 
             note_id_list = note_id_list + [{
                 'noteId': item['note_id'],
+                'xsecToken': item['xsec_token'],
                 'displayTitle': item['display_title']
             } for item in recursion_data['notes']]
             last_recursion_data = recursion_data
@@ -101,13 +104,14 @@ def recursion_scroll_until_no_more(note_id_list: list, cursor: str) -> list:
             print(e.msg)
             continue
     if last_recursion_data is not None and last_recursion_data['cursor'] is not None and last_recursion_data['cursor'] != '':
+        print(f'游标不为空，继续递归')
         recursion_scroll_until_no_more(note_id_list, last_recursion_data['cursor'])
     return note_id_list
 
 
-def parse_note_by_note_id(parsed_note_info_list: list, note_id: str, note_index: int = 0):
+def parse_note_by_note_id(parsed_note_info_list: list, note_id: str, xsec_token: str, note_index: int = 0):
     urllib3.disable_warnings()
-    response = requests.get(f'https://www.xiaohongshu.com/explore/{note_id}', verify=False)
+    response = requests.get(f'https://www.xiaohongshu.com/explore/{note_id}?xsec_token={xsec_token}&xsec_source=pc_user', verify=False)
     if response.status_code == 200:
         html_text = response.text
         parse_html_text(parsed_note_info_list, html_text, note_id, note_index)
@@ -127,6 +131,7 @@ def parse_html_text(parsed_note_info_list: list, html_text: str, note_id: str, n
                 print(f'json解析错误，noteId：{note_id}')
             break
     if result is None:
+        print('没有找到window.__INITIAL_STATE__，疑似被盾，稍等一会儿再试')
         return
     note = result['note']['noteDetailMap'][result['note']['firstNoteId']]['note']
     user_id = note['user']['userId']
@@ -157,9 +162,10 @@ def parse_html_text(parsed_note_info_list: list, html_text: str, note_id: str, n
 
 async def parse_with_aiohttp(sem: asyncio.Semaphore, parsed_note_info_list: list, parse_task_info_item: dict, client: aiohttp.ClientSession):
     note_id = parse_task_info_item['note_id']
+    xsec_token = parse_task_info_item['xsec_token']
     note_index = parse_task_info_item['note_index']
     async with sem:
-        async with client.get(f'https://www.xiaohongshu.com/explore/{note_id}', verify_ssl=False) as response:
+        async with client.get(f'https://www.xiaohongshu.com/explore/{note_id}?xsec_token={xsec_token}&xsec_source=pc_user', verify_ssl=False) as response:
             if response.status == 200:
                 html_text = await response.text()
                 await asyncio.sleep(0)
@@ -200,7 +206,7 @@ async def async_parse_main(parsed_note_info_list: list, parse_task_info_list: li
 def get_parsed_note_info_list(note_id_list: list) -> list:
     # 根据第一篇笔记获取用户名
     temp_list = []
-    parse_note_by_note_id(temp_list, note_id_list[0]['noteId'])
+    parse_note_by_note_id(temp_list, note_id_list[0]['noteId'], note_id_list[0]['xsecToken'])
     if not temp_list:
         raise Exception('temp_list 不应为空')
     user_id = temp_list[0]['user_id']
@@ -243,6 +249,7 @@ def get_result_json(result_file_path: str, note_id_list: list, parsed_note_info_
         note_count = note_count + 1
         parse_task_info_list.append({
             'note_id': item['noteId'],
+            'xsec_token': item['xsecToken'],
             'note_index': note_count
         })
     asyncio.run(async_parse_main(parsed_note_info_list, parse_task_info_list))
@@ -280,7 +287,7 @@ def download_note(note: dict):
             f.flush()
 
     if video_url is not None:
-        video_name = video_url.split('/').pop()
+        video_name = video_url.split('/').pop().split('?')[0]
         video_file_path = current_date_path + f'/{video_name}'
         if os.path.isfile(video_file_path):
             print(f'{video_file_path} 已存在')
@@ -361,10 +368,13 @@ def main():
     try:
         print('正在获取笔记')
         open_browser_and_login()
+        print('获取首页笔记...')
         first_page_result = find_result_in_first_page()
+        print('获取首页笔记成功')
         notes = first_page_result['user']['notes'][0]
         note_id_list = [{
             'noteId': item['noteCard']['noteId'],
+            'xsecToken': item['noteCard']['xsecToken'],
             'displayTitle': item['noteCard']['displayTitle']
         } for item in notes]
         cursor = first_page_result['user']['noteQueries'][0]['cursor']
