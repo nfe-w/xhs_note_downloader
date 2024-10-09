@@ -139,14 +139,31 @@ def parse_html_text(parsed_note_info_list: list, html_text: str, note_id: str, n
     create_time = datetime.fromtimestamp(note['time'] / 1000).strftime('%Y-%m-%d %H%M%S')
     title = note['title']
     desc = note['desc']
+    # 尝试获取图片
     image_id_list = [i['infoList'][0]['url'].split('!')[0].split('/').pop() for i in note['imageList']]
+    # 尝试获取视频
     video = note.get('video')
-    video_url = None
+    video_url_list = []
     if video is not None:
         stream = video['media']['stream']
-        match = re.search(r'"videoCodec": "(.*?)"', json.dumps(stream))
-        if match:
-            video_url = stream[match.group(1)][0]['masterUrl']
+        stream_str = json.dumps(stream)
+        codec = None
+        if '"videoCodec": "h264"' in stream_str:
+            codec = 'h264'
+        else:
+            match = re.search(r'"videoCodec": "(.*?)"', stream_str)
+            if match:
+                codec = match.group(1)
+                if codec == 'hevc':
+                    codec = 'h265'
+        video_url_list.append(stream[codec][0]['masterUrl'])
+    # 尝试获取live-photo
+    for item in note['imageList']:
+        h264 = item.get('stream', {}).get('h264', [])
+        master_url = h264[0].get('masterUrl') if len(h264) > 0 else None
+        if master_url is not None:
+            video_url_list.append(master_url)
+
     parsed_note_info_list.append({
         'note_index': note_index,
         'note_id': note_id,
@@ -156,7 +173,7 @@ def parse_html_text(parsed_note_info_list: list, html_text: str, note_id: str, n
         'title': title,
         'desc': desc,
         'image_id_list': image_id_list,
-        'video_url': video_url,
+        'video_url_list': video_url_list,
     })
 
 
@@ -272,7 +289,7 @@ def download_note(note: dict):
     title = note.get('title')
     desc = note.get('desc')
     image_id_list = note.get('image_id_list')
-    video_url = note.get('video_url')
+    video_url_list = note.get('video_url_list')
 
     current_date_path = f'download/{user_id}-{user_name}/{create_time}'
     os.makedirs(current_date_path, exist_ok=True)
@@ -287,24 +304,25 @@ def download_note(note: dict):
             f.write(desc)
             f.flush()
 
-    if video_url is not None:
-        video_name = video_url.split('/').pop().split('?')[0]
-        video_file_path = current_date_path + f'/{video_name}'
-        if os.path.isfile(video_file_path):
-            print(f'{video_file_path} 已存在')
-        else:
-            print(f'{video_file_path} 下载中')
-            res = requests.get(video_url, verify=False)
-            if res.status_code != 200:
-                print(f'视频请求失败，image_id：{video_url}')
-                return
-            content = res.content
-            if not content:
-                print(f'找不到视频数据，image_id：{video_url}')
-                return
-            with open(video_file_path, 'wb') as f:
-                f.write(content)
-            print(f'{video_file_path} 下载完毕')
+    if video_url_list is not None and len(video_url_list) > 0:
+        for video_url in video_url_list:
+            video_name = video_url.split('/').pop().split('?')[0]
+            video_file_path = current_date_path + f'/{video_name}'
+            if os.path.isfile(video_file_path):
+                print(f'{video_file_path} 已存在')
+            else:
+                print(f'{video_file_path} 下载中')
+                res = requests.get(video_url, verify=False)
+                if res.status_code != 200:
+                    print(f'视频请求失败，video_url：{video_url}')
+                    return
+                content = res.content
+                if not content:
+                    print(f'找不到视频数据，video_url：{video_url}')
+                    return
+                with open(video_file_path, 'wb') as f:
+                    f.write(content)
+                print(f'{video_file_path} 下载完毕')
 
     image_info_list = []
     for image_id in image_id_list:
