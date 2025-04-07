@@ -140,7 +140,14 @@ def parse_html_text(parsed_note_info_list: list, html_text: str, note_id: str, n
     title = note['title']
     desc = note['desc']
     # 尝试获取图片
-    image_id_list = [i['infoList'][0]['url'].split('!')[0].split('/').pop() for i in note['imageList']]
+    image_id_list = []
+    regex = re.compile(r'https?:\/\/sns-webpic-qc\.xhscdn\.com\/\d+\/[0-9a-z]+\/(\S+)!')
+    for i in note['imageList']:
+        temp_url = i['infoList'][0]['url']
+        match = regex.match(temp_url)
+        if match and match.group(1):
+            pic_id = match.group(1)
+            image_id_list.append(pic_id)
     # 尝试获取视频
     video = note.get('video')
     video_url_list = []
