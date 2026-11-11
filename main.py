@@ -111,7 +111,7 @@ def recursion_scroll_until_no_more(note_id_list: list, cursor: str) -> list:
 
 def parse_note_by_note_id(parsed_note_info_list: list, note_id: str, xsec_token: str, note_index: int = 0):
     urllib3.disable_warnings()
-    response = requests.get(f'https://www.xiaohongshu.com/explore/{note_id}?xsec_token={xsec_token}&xsec_source=pc_user', verify=False)
+    response = requests.get(f'https://www.xiaohongshu.com/explore/{note_id}?xsec_token={xsec_token}&xsec_source=pc_user', headers=get_headers(), verify=False)
     if response.status_code == 200:
         html_text = response.text
         parse_html_text(parsed_note_info_list, html_text, note_id, note_index)
@@ -334,8 +334,11 @@ def download_note(note: dict):
     image_info_list = []
     for image_id in image_id_list:
         image_file_path = current_date_path + f'/{image_id}.png'
-        if os.path.isfile(image_file_path):
-            print(f'{image_file_path} 已存在')
+        existing_image_path = next((os.path.splitext(image_file_path)[0] + extension
+                                    for extension in ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif')
+                                    if os.path.isfile(os.path.splitext(image_file_path)[0] + extension)), None)
+        if existing_image_path is not None:
+            print(f'{existing_image_path} 已存在')
             continue
         image_info_list.append({
             'image_id': image_id,
@@ -357,21 +360,35 @@ async def download_image_with_aiohttp(sem: asyncio.Semaphore, image_info_item: d
     image_file_path = image_info_item['image_file_path']
     async with sem:
         print(f'{image_file_path} 并发下载中')
-        async with client.get(f'https://ci.xiaohongshu.com/{image_id}?imageView2/2/w/0/format/png', verify_ssl=False) as response:
+        async with client.get(f'https://ci.xiaohongshu.com/{image_id}', verify_ssl=False) as response:
             if response.status == 200:
                 content = await response.content.read()
                 await asyncio.sleep(0)
                 if content:
-                    with open(image_file_path, 'wb') as f:
-                        f.write(content)
-                print(f'{image_file_path} 下载完毕')
+                    image_file_path = save_image(content, response.headers.get('Content-Type', ''), image_file_path)
+                    print(f'{image_file_path} 下载完毕')
             else:
                 print(f'{image_file_path} 下载异常❌')
 
 
+def save_image(content: bytes, content_type: str, image_file_path: str) -> str:
+    extension = {
+        'image/jpeg': '.jpg',
+        'image/png': '.png',
+        'image/webp': '.webp',
+        'image/gif': '.gif',
+        'image/avif': '.avif',
+    }.get(content_type.split(';')[0].strip().lower(), '.jpg')
+    image_file_path = os.path.splitext(image_file_path)[0] + extension
+    os.makedirs(os.path.dirname(os.path.abspath(image_file_path)), exist_ok=True)
+    with open(image_file_path, 'wb') as f:
+        f.write(content)
+    return image_file_path
+
+
 def download_image(image_id: str, image_file_path: str):
     print(f'{image_file_path} 下载中')
-    res = requests.get(f'https://ci.xiaohongshu.com/{image_id}?imageView2/2/w/0/format/png', verify=False)
+    res = requests.get(f'https://ci.xiaohongshu.com/{image_id}', verify=False)
     if res.status_code != 200:
         print(f'图片请求失败，image_id：{image_id}')
         return
@@ -379,8 +396,7 @@ def download_image(image_id: str, image_file_path: str):
     if not content:
         print(f'找不到图片数据，image_id：{image_id}')
         return
-    with open(image_file_path, 'wb') as f:
-        f.write(content)
+    image_file_path = save_image(content, res.headers.get('Content-Type', ''), image_file_path)
     print(f'{image_file_path} 下载完毕')
 
 
